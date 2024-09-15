@@ -1,6 +1,9 @@
 import pygame
 import numpy as np
 import random
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from matplotlib.widgets import Slider
 
 # Initialisation de Pygame
 pygame.init()
@@ -96,20 +99,115 @@ class SnakeEnv:
         pygame.draw.rect(ecran, ROUGE, [self.pomme[0], self.pomme[1], TAILLE_BLOC, TAILLE_BLOC])
         pygame.display.update()
 
-# Exemple d'utilisation
+class QLearningAgent:
+    def __init__(self, state_size, action_size, learning_rate=0.1, discount_factor=0.95, epsilon=1.0, epsilon_decay=0.995, epsilon_min=0.01):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.q_table = np.zeros((2**state_size, action_size))
+        self.lr = learning_rate
+        self.gamma = discount_factor
+        self.epsilon = epsilon
+        self.epsilon_decay = epsilon_decay
+        self.epsilon_min = epsilon_min
+
+    def get_action(self, state):
+        state_idx = self.state_to_index(state)
+        if np.random.rand() <= self.epsilon:
+            return np.random.randint(self.action_size)
+        return np.argmax(self.q_table[state_idx])
+
+    def state_to_index(self, state):
+        return int(''.join(map(str, state)), 2)
+
+    def train(self, state, action, reward, next_state, done):
+        state_idx = self.state_to_index(state)
+        next_state_idx = self.state_to_index(next_state)
+        
+        current_q = self.q_table[state_idx, action]
+        if done:
+            target_q = reward
+        else:
+            target_q = reward + self.gamma * np.max(self.q_table[next_state_idx])
+        
+        self.q_table[state_idx, action] += self.lr * (target_q - current_q)
+
+        if not done:
+            self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+
+def train_agent(env, agent, episodes=10000, max_steps=1000):
+    scores = []
+    fig, (ax1, ax2, ax_slider) = plt.subplots(3, 1, figsize=(10, 12), gridspec_kw={'height_ratios': [3, 1, 0.5]})
+    line, = ax2.plot([], [])
+    ax2.set_xlim(0, episodes)
+    ax2.set_ylim(0, 100)
+    ax2.set_xlabel('Épisodes')
+    ax2.set_ylabel('Score')
+    ax2.set_title('Performances de l\'agent')
+
+    slider = Slider(ax_slider, 'Vitesse (épisodes/minute)', 1, 600, valinit=60, valstep=1)
+    speed = 60  # Valeur initiale : 1 épisode par seconde
+
+    def update_speed(val):
+        nonlocal speed
+        speed = val
+
+    slider.on_changed(update_speed)
+
+    def update_plot(frame):
+        line.set_data(range(len(scores)), scores)
+        ax2.relim()
+        ax2.autoscale_view()
+        return line,
+
+    ani = FuncAnimation(fig, update_plot, interval=100, blit=True)
+    plt.show(block=False)
+
+    for episode in range(episodes):
+        state = env.reset()
+        total_reward = 0
+        
+        for step in range(max_steps):
+            action = agent.get_action(state)
+            next_state, reward, done = env.step(action)
+            agent.train(state, action, reward, next_state, done)
+            
+            state = next_state
+            total_reward += reward
+            
+            if episode % 10 == 0:  # Render every 10 episodes to speed up training
+                env.render()
+            
+            if done:
+                break
+        
+        scores.append(total_reward)
+        
+        if episode % 100 == 0:
+            print(f"Episode: {episode}, Score: {total_reward}, Epsilon: {agent.epsilon:.2f}")
+        
+        plt.pause(60 / speed)  # Ajuster la pause en fonction de la vitesse
+
+    return scores
+
+# Initialisation
 env = SnakeEnv()
-clock = pygame.time.Clock()
+state_size = len(env.get_state())
+action_size = 3  # 0: continue straight, 1: turn left, 2: turn right
+agent = QLearningAgent(state_size, action_size)
 
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            quit()
+try:
+    # Entraînement
+    scores = train_agent(env, agent, episodes=10000)  # Augmenté à 10000 épisodes
+except Exception as e:
+    print(f"Une erreur s'est produite : {e}")
+finally:
+    # Fermeture de la fenêtre Pygame
+    pygame.quit()
 
-    action = random.randint(0, 2)  # Action aléatoire pour cet exemple
-    state, reward, done = env.step(action)
-    env.render()
-    clock.tick(10)
-
-    if done:
-        env.reset()
+# Affichage du graphique final
+plt.figure(figsize=(10, 5))
+plt.plot(scores)
+plt.title('Scores au fil des épisodes')
+plt.xlabel('Épisodes')
+plt.ylabel('Score')
+plt.show()
